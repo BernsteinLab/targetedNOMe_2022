@@ -78,7 +78,7 @@ hm <- rbind(enh.48$score, enh.24$score, enh.0$score)
 rownames(hm) <- c('t48h', 't24h', 't0h')
 colnames(hm) <- NULL
 
-pdf('enhancher_heatmap.pdf', width=6, height=6)
+pdf('enhancer_heatmap.pdf', width=6, height=6)
 
 # Skew scale towards high open run signal
 scale <- c(rev(brewer.pal(9, 'Blues')[-c(1,3,5,7)]), brewer.pal(9, 'Reds'))
