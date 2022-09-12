@@ -7,6 +7,8 @@ library(BSgenome.Hsapiens.UCSC.hg38)
 library(rtracklayer)
 library(ggplot2)
 library(cowplot)
+source('../util/helper_functions.r')
+source('../util/plotting_functions.r')
 
 genome <- BSgenome.Hsapiens.UCSC.hg38
 
