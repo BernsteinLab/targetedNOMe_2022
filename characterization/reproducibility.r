@@ -97,7 +97,7 @@ correlate <- function(loci1.path, rdata1.path, loci2.path, rdata2.path, title, c
 min <- 1
 cov <- 20
 
-pdf('reproducibility_plots.pdf', width=10, height=8)
+pdf('reproducibility_plots.pdf', width=12, height=6)
 par(mfrow=c(1,2))
 h9.list <- correlate(loci_h9_1.path, rdata_h9_1.path, loci_h9_2.path, rdata_h9_2.path, 'H9', cov, min)
 hsmm.list <- correlate(loci_hsmm_1.path, rdata_hsmm_1.path, loci_hsmm_2.path, rdata_hsmm_2.path, 'HSMM', cov, min)
