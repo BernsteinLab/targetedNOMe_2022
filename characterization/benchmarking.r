@@ -1,5 +1,7 @@
-# This code compares the open run signal with DNase.
-# It does this for both GM12878 and K562.
+# This code compares the NOMe data with gold-standard assays.
+# It compares GM12878 and K562 with their respective DNase-seq 
+# peaks from ENCODE. For GM12878, it also compares the CpG
+# methylation with WGBS data also from ENCODE.
 
 # libraries and functions
 library(cowplot)
@@ -19,18 +21,7 @@ dnase.1.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/ENCODE/gm12878_dnase
 dnase.2.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/ENCODE/gm12878_dnase_hg38_rep2_ENCFF073ORT.bed'
 dnase.k562.path <- '/seq/epiprod02/Battaglia/ENCODEdata/K562/hg38/ENCFF433TIR_DNase_k562_narrowPeak_JS_2.bed'
 
-# Load in data
-loci <- import.bed(loci.path)
-
-extraCols_narrowPeak <- c(signalValue = "numeric", pValue = "numeric",
-						  qValue = "numeric", peak = "integer")
-dnase.1 <- import(dnase.1.path, extraCols=extraCols_narrowPeak)
-dnase.2 <- import(dnase.2.path, extraCols=extraCols_narrowPeak)
-dnase.gm <- mergePeaks(dnase.1, dnase.2)
-dnase.gm$idx <- seq(length(dnase.gm))
-
-dnase.k562 <- import(dnase.k562.path, extraCols=extraCols_narrowPeak)
-dnase.k562$idx <- seq(length(dnase.k562))
+wgbs.gm.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/ENCODE/gm12878_wgbs_hg38_rep2_ENCFF835NTC.bed'
 
 generate_controls <- function(loci, dnase){
 	# Fixed random seed
@@ -105,6 +96,19 @@ get_averages <- function(loci, rdata.path, peaks, controls){
 }
 
 ## DNase Comparisons ##
+# Load in data
+loci <- import.bed(loci.path)
+
+extraCols_narrowPeak <- c(signalValue = "numeric", pValue = "numeric",
+						  qValue = "numeric", peak = "integer")
+dnase.1 <- import(dnase.1.path, extraCols=extraCols_narrowPeak)
+dnase.2 <- import(dnase.2.path, extraCols=extraCols_narrowPeak)
+dnase.gm <- mergePeaks(dnase.1, dnase.2)
+dnase.gm$idx <- seq(length(dnase.gm))
+
+dnase.k562 <- import(dnase.k562.path, extraCols=extraCols_narrowPeak)
+dnase.k562$idx <- seq(length(dnase.k562))
+
 control.gm <- generate_controls(loci, dnase.gm)
 averages.gm <- get_averages(loci, rdata.gm.path, dnase.gm, control.gm)
 
@@ -172,7 +176,7 @@ averages.consensus <- averages.consensus[!(averages.consensus$active.x == 'OFF' 
 pmain <- ggplot(averages.consensus, aes(x=value.x, y=value.y, col=int)) + 
 		 geom_point(size=3, alpha=0.8) + 
 		 scale_color_manual(values=c("#a9a9a9","#7671b4", "#e7218c", "#65a743"),
-						   name='GM12878/K562 Activity') + 
+						    name='GM12878/K562 Activity') + 
 		 ylim(0,0.8) + xlim(0,0.8) + theme_bw(base_size=20) + 
 		 xlab('GM12878 Open Run Signal') + ylab('K562 Open Run Signal') +
 		 theme(panel.grid.minor = element_blank())
@@ -191,3 +195,43 @@ p2 <- insert_yaxis_grob(p1, ydens, grid::unit(0.2, 'null'), position='right')
 ggdraw(p2)
 
 dev.off()
+
+## WGBS Comparisons ##
+
+compBeta <- function(gr1, gr2){
+	hits <- findOverlaps(gr1, gr2)
+	beta1 <- gr1$beta[queryHits(hits)]
+	beta2 <- gr2$beta[subjectHits(hits)]
+	return(cor(beta1,beta2, use='complete.obs'))
+}
+
+# Load in data
+extraCols_wgbs <- c(cov = "integer", beta = "numeric")
+wgbs.gm <- import(wgbs.gm.path, extraCols=extraCols_wgbs)
+wgbs.gm <- wgbs.gm[wgbs.gm %over% loci]
+
+wgbs.gm$meth <- round(wgbs.gm$beta * wgbs.gm$cov / 100)
+wgbs.gm.w <- weave(wgbs.gm, 'CG', c('meth', 'cov'))
+wgbs.gm.w$beta <- wgbs.gm.w$meth / wgbs.gm.w$cov
+
+all_loci.list <- lapply(seq_along(loci), function(i, rdata.path, width){
+	locus <- loci[i]
+	message(locus$name)
+	load(sprintf('%s/%s-run.RData', rdata.path, locus$name))
+
+	tiles <- tile(locus, width=width)[[1]]
+	
+	# Exclude GCGs on either strand
+	good_idx <- CpG_fil$gcg_p == 0 & CpG_fil$gcg_m==0
+
+	CpG_fil <- CpG_fil[good_idx]
+	meMat.cg.f <- meMat.cg.f[,good_idx]
+	CpG_fil$beta <- colMeans(meMat.cg.f, na.rm=T)
+	CpG_fil$cov <- colSums(!is.na(meMat.cg.f))
+	return(CpG_fil)
+}, rdata.path=rdata.gm.path, width=100)
+gm.cg <- do.call(c, all_loci.list)
+
+# Enforce coverage > 30
+corr <- compBeta(gm.cg[gm.cg$cov > 30], wgbs.gm.w)
+message(sprintf("Correlation with WGBS: %s", corr))
