@@ -2,6 +2,36 @@
 # Collection of helper functions commonly used for analysis
 #******************************************************************************
 
+weave <- function(gr, diNT, fields){
+	# Combines stranded methylation data
+	#
+	# Args:
+	#	gr: GRanges object with methylation data split by strand
+	#	diNT: string describing methylation type ('CG' or 'GC')
+	#	fields: vector of strings containing metadata fields to merge
+	#
+	# Returns:
+	#	A GRanges object with data from both strands combined
+	offset <- ifelse(diNT == 'CG', -1, 1)
+
+	plus <- gr[strand(gr)=='+']
+	minus <- shift(gr[strand(gr)=='-'], offset)
+	
+	overlaps <- findOverlaps(plus, minus, ignore.strand=T)
+	combined <- plus
+
+	qh <- queryHits(overlaps)
+	sh <- subjectHits(overlaps)
+	for (field in fields){
+		merged <- plus@elementMetadata@listData[field][[1]][qh] + 
+					minus@elementMetadata@listData[field][[1]][sh]
+		combined@elementMetadata@listData[field][[1]][qh] <- merged 													 
+	}
+	combined <- c(combined, minus[-subjectHits(overlaps)])
+	
+	return(unstrand(combined))
+} 
+
 chopStr <- function(x, n){
 	# Extracts the end of a string
 	#
@@ -126,6 +156,42 @@ mergeMat <- function(reads, diNT, mergeNT, strands=F){
 	return(mat)
 }
 
+smooth_gr <- function(means, diNT, thresh){
+	# Smooth an array of scores tied to GRanges object
+	#
+	# Args:
+	#	means: numeric vector of averages
+	#	diNT: GRanges object equal in length to means corresponding to positions
+	#	thresh: integer specifying maximum base pair distance of adjacent position
+	#
+	# Returns:
+	#	diNT with an additional 'score' metadata column with smoothed values
+
+	# Create smoothing windows and find overlaps
+	windows <- resize(diNT, width=2*thresh, fix='center')
+	diNT <- resize(diNT, width=1, fix='center')
+
+	hits <- findOverlaps(diNT, windows)
+	
+	# Average score per window
+	avg.df <- aggregate(means[queryHits(hits)], by=list(subjectHits(hits)), 
+						FUN=mean, na.rm=T)
+	colnames(avg.df) <- c('new_idx', 'x')
+
+	windows$score <- NA
+	windows$score[avg.df$new_idx] <- avg.df$x
+
+	# Average score across windows
+	rev_avg.df <- aggregate(windows$score[subjectHits(hits)], by=list(queryHits(hits)), 
+							FUN=mean, na.rm=T)
+	colnames(rev_avg.df) <- c('new_idx', 'x')
+	
+	diNT$score <- NA
+	diNT$score[rev_avg.df$new_idx] <- rev_avg.df$x
+
+	return(diNT)
+}
+
 findPeaks <- function(summary, diNT, thresh, restrict, smoothing=T, 
 					  mult=2, smooth_mult=1, mean=0.15, sd=0.1, 
 					  erosion=4, dilation=4, plot=T, chr=NULL, from=NULL,
@@ -155,32 +221,6 @@ findPeaks <- function(summary, diNT, thresh, restrict, smoothing=T,
 	# Returns:
 	# 	GRanges object of identified peaks
 	#	If specified, Gviz plot showing the identified peaks
-
-	# Smooth an array of scores tied to GRanges object
-	.smooth <- function(means, diNT, thresh){
-		# Create smoothing windows and find overlaps
-		windows <- resize(diNT, width=2*thresh, fix='center')
-		diNT <- resize(diNT, width=1, fix='center')
-		hits <- findOverlaps(diNT, windows)
-
-		# Average score per window
-		avg.df <- aggregate(means[queryHits(hits)], by=list(subjectHits(hits)), FUN=mean, na.rm=T)
-		colnames(avg.df) <- c('new_idx', 'x')
-
-		windows$score <- NA
-		windows$score[avg.df$new_idx] <- avg.df$x 
-
-		# Average score across windows
-		rev_avg.df <- aggregate(windows$score[subjectHits(hits)], by=list(queryHits(hits)), FUN=mean, na.rm=T)
-		colnames(rev_avg.df) <- c('new_idx', 'x')
-		rev_avg.df$cov <- aggregate(rep(1,length(hits)), by=list(queryHits(hits)), FUN=sum)$x
-		diNT$score <- NA
-		diNT$score[rev_avg.df$new_idx] <- rev_avg.df$x
-		diNT$cov <- 1
-		diNT$cov[rev_avg.df$new_idx] <- rev_avg.df$cov
-
-		return(diNT)
-	}
 	
 	# Identify positive runs in array of numbers
 	.findContig <- function(bools, max){
@@ -254,7 +294,7 @@ findPeaks <- function(summary, diNT, thresh, restrict, smoothing=T,
 	}
 
 	if (smoothing){
-		smoothed <- .smooth(summary, diNT, thresh)
+		smoothed <- smooth_gr(summary, diNT, thresh)
 
 		# Override baseline if more active
 		if (median(smoothed$score, na.rm=T) > mean){
@@ -263,7 +303,8 @@ findPeaks <- function(summary, diNT, thresh, restrict, smoothing=T,
 		}
 
 		max <- 2
-		hi <- (smoothed$score > (mean + mult * sd)) + (smoothed$score > (mean + smooth_mult * sd))
+		hi <- (smoothed$score > (mean + mult * sd)) + 
+			  (smoothed$score > (mean + smooth_mult * sd))
 		hi[is.na(hi)] <- 0
 
 		# Dilate & erode then erode & dilate
@@ -295,7 +336,8 @@ findPeaks <- function(summary, diNT, thresh, restrict, smoothing=T,
 		return(GRanges())
 	}
 
-	peaks <- GRanges(as.character(unique(seqnames(smoothed))), IRanges(start(smoothed[idx$starts]), end(smoothed[idx$ends])))
+	peaks <- GRanges(as.character(unique(seqnames(smoothed))), 
+					 IRanges(start(smoothed[idx$starts]), end(smoothed[idx$ends])))
 	peaks <- peaks[peaks %over% restrict]
 
 	# # Find First and Second Derivatives
@@ -307,14 +349,19 @@ findPeaks <- function(summary, diNT, thresh, restrict, smoothing=T,
 	# dx2 <- shift(dx[-length(dx)], dist2 / 2)
 	# d2 <- diff(d1) / dist2
 	if(plot){
-		meanTrack <- DataTrack(range=diNT, data=summary, name='Mean GCH\n Methylation', cex.title=2, cex.axis=1.2, type='l', ylim=c(0,1), size=3)
-		smoothTrack <- DataTrack(range=smoothed[smoothed$cov > 1], data=smoothed$score[smoothed$cov > 1], name='Smoothed GCH\n Methylation', cex.title=2, cex.axis=1.2, type='l', ylim=c(0,1), size=3)
+		meanTrack <- DataTrack(range=diNT, data=summary, name='Mean GCH\n Methylation', 
+							   cex.title=2, cex.axis=1.2, type='l', ylim=c(0,1), size=3)
+		smoothTrack <- DataTrack(range=smoothed[which(smoothed$cov > 1)], 
+								 data=smoothed$score[which(smoothed$cov > 1)], 
+								 name='Smoothed GCH\n Methylation', cex.title=2, 
+								 cex.axis=1.2, type='l', ylim=c(0,1), size=3)
 
-		peakCalls <- AnnotationTrack(peaks, chromosome=chr, start=from, end=to, name='Called Peaks', rot.title=0, cex.title=2)
+		peakCalls <- AnnotationTrack(peaks, chromosome=chr, start=from, end=to, 
+									 name='Called Peaks', rot.title=0, cex.title=2)
 
 		ht <- HighlightTrack(trackList=list(meanTrack, smoothTrack, peakCalls), range=peaks)
-		plotTracks(list(itrack, gtrack, ht, txTr), chromosome=chr, from=from, to=to, max.height=1,
-		collapseTranscripts ="meta", transcriptAnnotation='symbol')
+		plotTracks(list(itrack, gtrack, ht, txTr), chromosome=chr, from=from, to=to,
+				   max.height=1, collapseTranscripts ="meta", transcriptAnnotation='symbol')
 	}
 
 	return(peaks)
@@ -355,6 +402,23 @@ tallyHits <- function(gr1, gr2){
 	#	A vector of integers equal in length to gr1 counting hits of gr2
 	hits <- findOverlaps(gr1, gr2)
 	hits.df <- aggregate(rep(1, length(hits)), by=list(queryHits(hits)), FUN=sum)
+	result <- rep(NA, length(gr1))
+	result[hits.df$Group.1] <- hits.df$x
+	return(result)
+}
+
+avgHits <- function(gr1, gr2){
+	# Average overlaps of two sets of genomic ranges
+	#
+	# Args:
+	#	gr1: Granges object of interest
+	#	gr2: Granges object to average
+	#
+	# Returns:
+	#	A numeric vector equal in length to gr1 averaging the scores of overlapping gr2
+	hits <- findOverlaps(gr1, gr2)
+	hits.df <- aggregate(gr2$score[subjectHits(hits)], by=list(queryHits(hits)), 
+						 FUN=mean, na.rm=T)
 	result <- rep(NA, length(gr1))
 	result[hits.df$Group.1] <- hits.df$x
 	return(result)
