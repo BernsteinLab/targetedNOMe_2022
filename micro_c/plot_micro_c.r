@@ -5,6 +5,14 @@ library(RColorBrewer)
 library(grid)
 source('../util/plotting_functions.r')
 
+# Paths to matrices extracted by cooltools
+path1 <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/assembly/microC_merged/coolMatrix_chm13_merged_all.txt'
+path2 <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/assembly/microC_merged/coolMatrix_repaired_merged_all.txt'
+path3 <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/assembly/microC/coolMatrix_paper_all.txt'
+path4 <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/assembly/microC_merged/coolMatrix_repaired_merged.txt'
+paths <- c(path1, path2, path3, path4)
+titles <-c('CHM13', 'Repaired', 'hg38', 'Repaired')
+
 plotMicroC <- function(path, percentile, col_pal, title){
 	# Plots Micro-C matrix
 	#
@@ -62,14 +70,6 @@ plotMicroC <- function(path, percentile, col_pal, title){
 	popViewport()
 	popViewport()
 }
-
-# Paths to matrices extracted by cooltools
-path1 <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/assembly/microC_merged/coolMatrix_chm13_merged_all.txt'
-path2 <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/assembly/microC_merged/coolMatrix_repaired_merged_all.txt'
-path3 <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/assembly/microC/coolMatrix_paper_all.txt'
-path4 <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/assembly/microC_merged/coolMatrix_repaired_merged.txt'
-paths <- c(path1, path2, path3, path4)
-titles <-c('CHM13', 'Repaired', 'hg38', 'Repaired')
 
 # Color scale
 col_pal <- brewer.pal(9, 'Reds')

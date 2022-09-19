@@ -15,11 +15,85 @@ rdata.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/200913_GM12878/rdata'
 motifs.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/references/gm_k562_motifs.RDS'
 ctcf.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/ENCODE/gm12878_ctcf_hg38_idr_ENCFF796WRU.bed'
 
+plot_ctcf <- function(list){
+	n <- sum(sapply(list, function(el){length(el[[3]])}))
+	message(sprintf('%s total reads', n))
+
+	results.list <- lapply(list, function(el){
+		el[[1]]
+	})
+	results2 <- do.call(rbind, results.list)
+
+	scores.list <- lapply(list, function(el){
+		return(el[[3]])
+	})
+	scores <- do.call(c, scores.list)
+
+	cpg_scores.list <- lapply(list, function(el){
+		return(el[[4]])
+	})
+	cpg_scores <- do.call(c, cpg_scores.list)
+
+	open_scores.list <- lapply(list, function(el){
+		return(el[[5]])
+	})
+	open_scores <- do.call(c, open_scores.list)
+	
+	# Assign colors to scores
+	idx <- which(cpg_scores >= 0.5)
+	cpg_col <- vector('character', length(cpg_scores))
+	cpg_col[idx] <- '#cb181d'
+	cpg_col[-idx] <- '#DCDCDC'
+
+	col_fun <- colorRamp(brewer.pal(9, 'Greens'))
+	open_col<- rgb(col_fun(open_scores), maxColorValue=255)
+
+	col_fun <- colorRamp(c('#ffffff', '#f0eaf3', '#e2d5e7', '#d3c0db', '#c5abcf', '#b697c3', '#a884b7', '#9970ab'))
+	score_col<- rgb(col_fun(abs(scores)), maxColorValue=255)
+
+	# Reorder the reads in the results plot
+	groups <- split(seq(nrow(results2)), ceiling(seq(nrow(results2))/4))
+	order <- order(abs(scores), decreasing=T)
+	mat_order <- do.call(c, groups[order])
+
+	# # Test pattern
+	# grid.newpage()
+
+	# pushViewport(viewport(layout = grid.layout(3, 9, widths=c(1,15,0.25,0.75,0.25,0.75,0.25,0.75,1), 
+	# 										   heights=c(1.5,17,1.5))))
+	# for(i in seq(3)){
+	# 	for(j in seq(9)){
+	# 		pushViewport(viewport(layout.pos.col = j, layout.pos.row = i))
+	# 		grid.rect()
+	# 		grid.circle()
+	# 		popViewport()
+	# 	}
+	# }
+	grid.newpage()
+	pushViewport(viewport(layout = grid.layout(3, 9, widths=c(1,15,0.25,0.75,0.25,0.75,0.25,0.75,1), 
+											heights=c(1.5,17,1.5))))
+	pushViewport(viewport(layout.pos.row = 2, layout.pos.col=2))
+	grid.raster(results2[mat_order,], interpolate=F, width=unit(1,'npc'), height=unit(1,'npc'))
+	popViewport()
+	pushViewport(viewport(layout.pos.row = 2, layout.pos.col=4))
+	grid.rect()
+	sideColorBar(cpg_col[order], rep=3, width=1)
+	popViewport()
+	pushViewport(viewport(layout.pos.row = 2, layout.pos.col=6))
+	grid.rect()
+	sideColorBar(open_col[order], rep=3, width=1)
+	popViewport()
+	pushViewport(viewport(layout.pos.row = 2, layout.pos.col=8))
+	grid.rect()
+	sideColorBar(score_col[order], rep=3, width=1)
+	popViewport()
+}
+
 # Load in data
 loci <- import.bed(loci.path)
 motifs <- readRDS(motifs.path)
 
-# CTCF
+## CTCF ##
 extraCols_narrowPeak <- c(signalValue = "numeric", pValue = "numeric",
 						  qValue = "numeric", peak = "integer")
 ctcf <- import.bed(ctcf.path, extraCols=extraCols_narrowPeak)
@@ -98,80 +172,6 @@ out.list <- lapply(seq_along(out), function(i, roi.width=1000){
 						   linker=F, short=T, cpg=F, peaks=NULL, plot=F)
 	return(list(results, rownames(meMat.gc.f)[select], score, cpg_score, open_score))
 }, roi.width=1000)
-
-plot_ctcf <- function(list){
-	n <- sum(sapply(list, function(el){length(el[[3]])}))
-	message(sprintf('%s total reads', n))
-
-	results.list <- lapply(list, function(el){
-		el[[1]]
-	})
-	results2 <- do.call(rbind, results.list)
-
-	scores.list <- lapply(list, function(el){
-		return(el[[3]])
-	})
-	scores <- do.call(c, scores.list)
-
-	cpg_scores.list <- lapply(list, function(el){
-		return(el[[4]])
-	})
-	cpg_scores <- do.call(c, cpg_scores.list)
-
-	open_scores.list <- lapply(list, function(el){
-		return(el[[5]])
-	})
-	open_scores <- do.call(c, open_scores.list)
-	
-	# Assign colors to scores
-	idx <- which(cpg_scores >= 0.5)
-	cpg_col <- vector('character', length(cpg_scores))
-	cpg_col[idx] <- '#cb181d'
-	cpg_col[-idx] <- '#DCDCDC'
-
-	col_fun <- colorRamp(brewer.pal(9, 'Greens'))
-	open_col<- rgb(col_fun(open_scores), maxColorValue=255)
-
-	col_fun <- colorRamp(c('#ffffff', '#f0eaf3', '#e2d5e7', '#d3c0db', '#c5abcf', '#b697c3', '#a884b7', '#9970ab'))
-	score_col<- rgb(col_fun(abs(scores)), maxColorValue=255)
-
-	# Reorder the reads in the results plot
-	groups <- split(seq(nrow(results2)), ceiling(seq(nrow(results2))/4))
-	order <- order(abs(scores), decreasing=T)
-	mat_order <- do.call(c, groups[order])
-
-	# # Test pattern
-	# grid.newpage()
-
-	# pushViewport(viewport(layout = grid.layout(3, 9, widths=c(1,15,0.25,0.75,0.25,0.75,0.25,0.75,1), 
-	# 										   heights=c(1.5,17,1.5))))
-	# for(i in seq(3)){
-	# 	for(j in seq(9)){
-	# 		pushViewport(viewport(layout.pos.col = j, layout.pos.row = i))
-	# 		grid.rect()
-	# 		grid.circle()
-	# 		popViewport()
-	# 	}
-	# }
-	grid.newpage()
-	pushViewport(viewport(layout = grid.layout(3, 9, widths=c(1,15,0.25,0.75,0.25,0.75,0.25,0.75,1), 
-											heights=c(1.5,17,1.5))))
-	pushViewport(viewport(layout.pos.row = 2, layout.pos.col=2))
-	grid.raster(results2[mat_order,], interpolate=F, width=unit(1,'npc'), height=unit(1,'npc'))
-	popViewport()
-	pushViewport(viewport(layout.pos.row = 2, layout.pos.col=4))
-	grid.rect()
-	sideColorBar(cpg_col[order], rep=3, width=1)
-	popViewport()
-	pushViewport(viewport(layout.pos.row = 2, layout.pos.col=6))
-	grid.rect()
-	sideColorBar(open_col[order], rep=3, width=1)
-	popViewport()
-	pushViewport(viewport(layout.pos.row = 2, layout.pos.col=8))
-	grid.rect()
-	sideColorBar(score_col[order], rep=3, width=1)
-	popViewport()
-}
 
 pdf('ctcf_ordered_reads_meth.pdf', width=20, height=12)
 plot_ctcf(over.list)

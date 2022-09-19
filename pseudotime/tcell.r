@@ -31,6 +31,43 @@ rdata.48.path <- '/seq/epiprod02/Battaglia/NanoNOMe/Tcells_nov2020/t48h/workspac
 txdb.path <- '/seq/epiprod02/kdong/references/txdb/hg38.knownGene'
 ideo.path <- '/seq/epiprod02/kdong/references/gviz/cytoBandIdeo.txt'
 
+# Add random seed setting to TSCAN's exprmclust function
+exprmclust2 <- function (data, clusternum = 2:9, modelNames = "VVV", reduce = T) {
+	set.seed(1234)
+	if (reduce) {
+		sdev <- prcomp(t(data), scale = T)$sdev[1:20]
+		x <- 1:20
+		optpoint <- which.min(sapply(2:10, function(i) {
+		x2 <- pmax(0, x - i)
+		sum(lm(sdev ~ x + x2)$residuals^2)
+		}))
+		pcadim = optpoint + 1
+		tmpdata <- t(apply(data, 1, scale))
+		colnames(tmpdata) <- colnames(data)
+		tmppc <- prcomp(t(tmpdata), scale = T)
+		pcareduceres <- t(tmpdata) %*% tmppc$rotation[, 1:pcadim]
+  	}
+  	else {
+		pcareduceres <- t(data)
+  	}
+  	clusternum <- clusternum[clusternum > 1]
+  	res <- suppressWarnings(Mclust(pcareduceres, G = clusternum, 
+	modelNames = modelNames))
+	clusterid <- apply(res$z, 1, which.max)
+	clucenter <- matrix(0, ncol = ncol(pcareduceres), nrow = res$G)
+	for (cid in 1:res$G) {
+		clucenter[cid, ] <- colMeans(pcareduceres[names(clusterid[clusterid == 
+		cid]), , drop = F])
+	}
+	dp <- as.matrix(dist(clucenter))
+	gp <- graph.adjacency(dp, mode = "undirected", weighted = TRUE)
+	dp_mst <- minimum.spanning.tree(gp)
+	list(pcareduceres = pcareduceres, MSTtree = dp_mst, clusterid = clusterid, 
+		 clucenter = clucenter)
+}
+environment(exprmclust2) <- asNamespace('TSCAN')
+
+
 # Load in data
 loci <- import.bed(loci.path)
 
@@ -368,42 +405,6 @@ meMat.list <- lapply(idx, function(i, rdata.0.path, rdata.24.path, rdata.48.path
 data <- meMat.list[[1]]
 data.pca <- prcomp(data[rowSums(!is.na(data)) == ncol(data), 1:(ncol(data)-1)], scale=T)
 
-# Add random seed setting to TSCAN's exprmclust function
-exprmclust2 <- function (data, clusternum = 2:9, modelNames = "VVV", reduce = T) {
-	set.seed(1234)
-	if (reduce) {
-		sdev <- prcomp(t(data), scale = T)$sdev[1:20]
-		x <- 1:20
-		optpoint <- which.min(sapply(2:10, function(i) {
-		x2 <- pmax(0, x - i)
-		sum(lm(sdev ~ x + x2)$residuals^2)
-		}))
-		pcadim = optpoint + 1
-		tmpdata <- t(apply(data, 1, scale))
-		colnames(tmpdata) <- colnames(data)
-		tmppc <- prcomp(t(tmpdata), scale = T)
-		pcareduceres <- t(tmpdata) %*% tmppc$rotation[, 1:pcadim]
-  	}
-  	else {
-		pcareduceres <- t(data)
-  	}
-  	clusternum <- clusternum[clusternum > 1]
-  	res <- suppressWarnings(Mclust(pcareduceres, G = clusternum, 
-	modelNames = modelNames))
-	clusterid <- apply(res$z, 1, which.max)
-	clucenter <- matrix(0, ncol = ncol(pcareduceres), nrow = res$G)
-	for (cid in 1:res$G) {
-		clucenter[cid, ] <- colMeans(pcareduceres[names(clusterid[clusterid == 
-		cid]), , drop = F])
-	}
-	dp <- as.matrix(dist(clucenter))
-	gp <- graph.adjacency(dp, mode = "undirected", weighted = TRUE)
-	dp_mst <- minimum.spanning.tree(gp)
-	list(pcareduceres = pcareduceres, MSTtree = dp_mst, clusterid = clusterid, 
-		 clucenter = clucenter)
-}
-environment(exprmclust2) <- asNamespace('TSCAN')
-
 data.clust <- exprmclust2(t(data[rowSums(!is.na(data)) == ncol(data), 1:(ncol(data)-1)]), modelNames='EVV')
 data.order <- TSCANorder(data.clust)
 order <- match(data.order, seq(nrow(data)))
@@ -419,9 +420,7 @@ dev.off()
 # Reorder and smooth data
 data.ordered <- data[order, -ncol(data)]
 colnames(data.ordered) <- seq(ncol(data.ordered))
-smooth <- function(x, n=5){
-	stats::filter(x, rep(1/n, n), sides=2)
-}
+
 data.ordered.s <- as.data.frame(apply(data.ordered, 2, function(col){
 	smooth(col, 51)
 }))

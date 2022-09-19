@@ -24,28 +24,6 @@ hap2.path <- '/seq/epiprod02/Battaglia/NanoNOMe/Imprinting_May2021/H9/workspace_
 txdb.path <- '/seq/epiprod02/kdong/references/txdb/hg38.knownGene'
 ideo.path <- '/seq/epiprod02/kdong/references/gviz/cytoBandIdeo.txt'
 
-# Load in data
-loci <- import.bed(loci.path)
-bam <- readGAlignments(bam.path, use.names=T, param=ScanBamParam(what='seq'))
-genome <- BSgenome.Hsapiens.UCSC.hg38
-snps <-readVcf(vcf.path, seqinfo(genome))
-
-hap1.names <- read.table(hap1.path, stringsAsFactors=F)$V1
-hap2.names <- read.table(hap2.path, stringsAsFactors=F)$V1
-
-gpc.list <- loadGpC(loci, rdata.path, hap1.names, hap2.names)
-
-# Determine SNP type
-snps.het <- snps@rowRanges[grepl('\\|', geno(snps)@listData$GT[,'sample'])]
-snps.het$ref <- substr(names(snps.het), nchar(names(snps.het))-2, nchar(names(snps.het))-2)
-snps.het$alt <- substr(names(snps.het), nchar(names(snps.het)), nchar(names(snps.het)))
-snps.het$geno <- 'hetero'
-snps.hom <- snps@rowRanges[grepl('1/1', geno(snps)@listData$GT[,'sample'])]
-snps.hom$ref <- substr(names(snps.hom), nchar(names(snps.hom))-2, nchar(names(snps.hom))-2)
-snps.hom$alt <- substr(names(snps.hom), nchar(names(snps.hom)), nchar(names(snps.hom)))
-snps.hom$geno <- 'homo'
-snps.all <- sort(c(snps.hom, snps.het))
-
 refLoc2queryLoc <- function(pos, read){
 	# Converts reference positions to read positions
 	#
@@ -70,6 +48,28 @@ refLoc2queryLoc <- function(pos, read){
 	})
 	return(do.call(c, return.list))
 }
+
+# Load in data
+loci <- import.bed(loci.path)
+bam <- readGAlignments(bam.path, use.names=T, param=ScanBamParam(what='seq'))
+genome <- BSgenome.Hsapiens.UCSC.hg38
+snps <-readVcf(vcf.path, seqinfo(genome))
+
+hap1.names <- read.table(hap1.path, stringsAsFactors=F)$V1
+hap2.names <- read.table(hap2.path, stringsAsFactors=F)$V1
+
+gpc.list <- loadGpC(loci, rdata.path, hap1.names, hap2.names)
+
+# Determine SNP type
+snps.het <- snps@rowRanges[grepl('\\|', geno(snps)@listData$GT[,'sample'])]
+snps.het$ref <- substr(names(snps.het), nchar(names(snps.het))-2, nchar(names(snps.het))-2)
+snps.het$alt <- substr(names(snps.het), nchar(names(snps.het)), nchar(names(snps.het)))
+snps.het$geno <- 'hetero'
+snps.hom <- snps@rowRanges[grepl('1/1', geno(snps)@listData$GT[,'sample'])]
+snps.hom$ref <- substr(names(snps.hom), nchar(names(snps.hom))-2, nchar(names(snps.hom))-2)
+snps.hom$alt <- substr(names(snps.hom), nchar(names(snps.hom)), nchar(names(snps.hom)))
+snps.hom$geno <- 'homo'
+snps.all <- sort(c(snps.hom, snps.het))
 
 idx <- which(loci$name == 'SNRPN')
 locus <- loci[idx]

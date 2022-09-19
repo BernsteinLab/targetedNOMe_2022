@@ -22,6 +22,24 @@ peaks.48.path <- '/seq/epiprod02/Battaglia/NanoNOMe/Tcells_nov2020/t48h/workspac
 
 tss_tcell.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/references/tss_tcell.rds'
 
+get_enhancers <- function(loci, rdata.path, peaks, tss){
+
+	result.list <- lapply(seq_along(loci), function(i, rdata.path, peaks, tss){
+		locus <- loci[i]
+		message(locus$name)
+		load(sprintf('%s/%s-run.RData', rdata.path, locus$name))
+		load(sprintf('%s/%s-runMat.RData', rdata.path, locus$name))
+		
+		buffer <- peaks[peaks %over% locus & peaks %outside% tss]
+		buffer$score <- colMeans(mergeMat(runMat.open[open_run.qc < 2,], tiles, buffer), 
+								 na.rm=T)
+		return(buffer)
+
+	}, rdata.path=rdata.path, peaks=peaks, tss=tss)
+
+	result <- do.call(c, result.list)
+}
+
 # Load in data
 loci <- import.bed(loci.path)
 
@@ -51,24 +69,6 @@ peaks.all$diff <- (!peaks.all$zero & peaks.all$day2)
 
 # Enhancer Heatmap
 avoid <- resize(tss.l, width=4000, fix='center')
-
-get_enhancers <- function(loci, rdata.path, peaks, tss){
-
-	result.list <- lapply(seq_along(loci), function(i, rdata.path, peaks, tss){
-		locus <- loci[i]
-		message(locus$name)
-		load(sprintf('%s/%s-run.RData', rdata.path, locus$name))
-		load(sprintf('%s/%s-runMat.RData', rdata.path, locus$name))
-		
-		buffer <- peaks[peaks %over% locus & peaks %outside% tss]
-		buffer$score <- colMeans(mergeMat(runMat.open[open_run.qc < 2,], tiles, buffer), 
-								 na.rm=T)
-		return(buffer)
-
-	}, rdata.path=rdata.path, peaks=peaks, tss=tss)
-
-	result <- do.call(c, result.list)
-}
 
 enh.0 <- get_enhancers(loci, rdata.0.path, peaks.all, avoid)
 enh.24 <- get_enhancers(loci, rdata.24.path, peaks.all, avoid)

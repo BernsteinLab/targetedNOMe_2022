@@ -5,8 +5,7 @@ library(rtracklayer)
 
 # Paths to data and references
 loci.path <- '/seq/epiprod02/Battaglia/NanoNOMe/200913_K562/200913_Loci.bed'
-# Folder with motifs split by chromosome
-motifs.path <- '/seq/epiprod02/jingyi/nano_nome/210112_motif'
+motifs.path <- '/seq/epiprod02/jingyi/nano_nome/210112_motif' # Folder with motifs split by chromosome
 save.filename <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/references/gm_k562_motifs.RDS'
 
 # Load in data

@@ -21,13 +21,6 @@ rdata.48.path <- '/seq/epiprod02/Battaglia/NanoNOMe/Tcells_nov2020/t48h/workspac
 tss_gm_k562.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/references/tss_gm_k562.rds'
 tss_tcell.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/references/tss_tcell.rds'
 
-# Load in data
-tss.f <- readRDS(tss_gm_k562.path)
-tss.l <- readRDS(tss_tcell.path)
-
-loci <- import.bed(loci.path)
-loci_tcell <- import.bed(loci_tcell.path)
-
 get_averages <- function(loci, rdata.path, tss, variable, var, cpg=F, pad=F){
 	.get_scores <- function(peaks, tiles, runMat, variable, var){
 		scores.list <- lapply(seq_along(peaks), function(i,  tiles, runMat, variable, var){
@@ -141,6 +134,13 @@ plot_tss <- function(matrix, df, cellType, matType, lines=F){
 			main=sprintf('300 bp Smoothed Distributions at %s Bp', bpText))
 	par(mfrow=c(1,1))
 }
+
+# Load in data
+tss.f <- readRDS(tss_gm_k562.path)
+tss.l <- readRDS(tss_tcell.path)
+
+loci <- import.bed(loci.path)
+loci_tcell <- import.bed(loci_tcell.path)
 
 ## GM12878 & K562 ##
 tss_open.gm <- get_averages(loci, rdata.gm.path, tss.f, 'GM12878', 'GM')
