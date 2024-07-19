@@ -7,7 +7,9 @@
 # Provide a locus file (-L)
 
 ## qsub arguments
-#$ -l h_vmem=16G
+#$ -l h_vmem=8G
+#$ -pe smp 16
+#$ -binding linear:16
 #$ -l h_rt=6:00:00
 #$ -l os=RedHat7
 #$ -r y

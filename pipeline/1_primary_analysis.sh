@@ -45,6 +45,12 @@ nanopolish="/seq/epiprod02/kdong/software/nanopolish-13.2/nanopolish"
 nanopolish_meth="/seq/epiprod02/kdong/software/nanopolish-cpggpc/nanopolish"
 np_frequency_cpg="${SCRIPT_DIR}/scripts/calculate_methylation_frequency_cpg_strands.py"
 np_frequency_gpc="${SCRIPT_DIR}/scripts/calculate_methylation_frequency_gpc_strands.py"
+hdf5_env="/seq/epiprod02/kdong/environments/hdf5"
+
+eval "$(conda shell.bash hook)"
+conda activate ${hdf5_env}
+export HDF5_PLUGIN_PATH=/broad/software/free/Linux/redhat_7_x86_64/pkgs/anaconda3_2020.07/bin:$HDF_PLUGIN_PATH
+echo "$(which h5repack)"
 
 # Defaults
 PREFIX="output"

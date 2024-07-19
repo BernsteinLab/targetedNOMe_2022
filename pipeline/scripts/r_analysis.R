@@ -13,11 +13,15 @@ args <- commandArgs(trailingOnly=TRUE)
 source(paste0(utils.dir, 'helper_functions.r'))
 source(paste0(utils.dir, 'pipeline_functions.r'))
 suppressMessages(library("BSgenome.Hsapiens.UCSC.hg38"))
+suppressMessages(library("doParallel"))
+suppressMessages(library("foreach"))
 suppressMessages(library("GenomicFeatures"))
 suppressMessages(library("Gviz"))
 suppressMessages(library("org.Hs.eg.db"))
 
 genome <- BSgenome.Hsapiens.UCSC.hg38
+cl <- makeCluster(16, outfile='log.txt') #TODO: parameterize
+registerDoParallel(cl)
 
 # References
 gcg.path <- '/seq/epiprod02/kdong/SofiaSandbox/NanoNOMe/references/gcg_strands.rds'
@@ -34,20 +38,28 @@ gpc.out <- gsub("_gpc_methylation_reads.bed", "_gch_reduc.rds", gpc.bed)
 prefix <- gsub("_cpg_methylation_reads.bed", "", cpg.bed)
 
 message("Importing CpG files")
-cpg <- readMethyl(cpg.bed, 'CG')
-hcg <- exclude_gcg(cpg[cpg %over% loci], gcg, 'CG')
+# Skip if previously done
+hcg <- tryCatch(readRDS(cpg.out), error=function(e){return(NULL)})
+if (is.null(hcg)){
+	cpg <- readMethyl(cpg.bed, 'CG')
+	hcg <- exclude_gcg(cpg[cpg %over% loci], gcg, 'CG')
 
-# Remove for memory
-rm(cpg)
-saveRDS(hcg, file=cpg.out, version=2)
+	# Remove for memory
+	rm(cpg)
+	saveRDS(hcg, file=cpg.out, version=2)
+}
 
 message("Importing GpC files...")
-gpc <- readMethyl(gpc.bed, 'GC')
-gch <- exclude_gcg(gpc[gpc %over% loci], gcg, 'GC')
+# Skip if previously done
+gch <- tryCatch(readRDS(gpc.out), error=function(e){return(NULL)})
+if (is.null(gch)){
+	gpc <- readMethyl(gpc.bed, 'GC')
+	gch <- exclude_gcg(gpc[gpc %over% loci], gcg, 'GC')
 
-# Remove for memory
-rm(gpc)
-saveRDS(gch, file=gpc.out, version=2)
+	# Remove for memory
+	rm(gpc)
+	saveRDS(gch, file=gpc.out, version=2)
+}
 
 # Save 
 short_c <- 80
@@ -55,19 +67,27 @@ long_c <- 80
 linker <- 80
 
 message("Saving methylation matrices...")
-for(i in seq(length(loci))){
-	message(loci$name[i])
+tic <- Sys.time()
+tmp <- foreach(i=seq(length(loci)), .packages=c("BSgenome.Hsapiens.UCSC.hg38")) %dopar% {
+	locus <- loci[i]
+	
+	message(paste(i, locus$name))
 
-	CpG <- diNT(loci[i], 'CG')
-	GpC <- diNT(loci[i], 'GC')
+	CpG <- diNT(locus, 'CG')
+	GpC <- diNT(locus, 'GC')
 
 	GCG <- CpG[CpG %over% GpC]
-	CGC <- findCGC(loci[i])
+	CGC <- findCGC(locus)
 
-	meMat.cg <- meMat(loci[i], hcg, CpG)
-	meMat.gc <- meMat(loci[i], gch, GpC)
+	meMat.cg <- meMat(locus, hcg, CpG)
+	meMat.gc <- meMat(locus, gch, GpC)
 
-	groups <- findGroups(loci[i])
+	if (nrow(meMat.gc) == 0){
+		message("0 Coverage")
+		return(NULL)
+	}
+
+	groups <- findGroups(locus)
 
 	CpG_mer <- groups[groups %over% CpG]
 	GpC_mer <- shift(groups[shift(groups,1) %over% GpC],1)
@@ -99,19 +119,19 @@ for(i in seq(length(loci))){
 					   (GpC_mer$gcg_m / GpC_mer$tot) < 0.5]
 	
 	meMat.cg.f <- mergeMat(meMat.cg, CpG, CpG_fil, strands=T)
-	meMat.gc.f <- mergeMat(meMat.gc[dev(meMat.gc) < 0.3 & rowMeans(meMat.gc, na.rm=T) > 0.02,], 
+	meMat.gc.f <- mergeMat(meMat.gc[dev(meMat.gc) < 0.3 & rowMeans(meMat.gc, na.rm=T) > 0.02,,drop=F], 
 						   GpC, GpC_fil, strands=T)
 	
-	if(nrow(meMat.gc.f) == 0){
+	if (nrow(meMat.gc.f) == 0){
 		message("SKIP")
-		next
+		return(NULL)
 	}
 	
 	# Determine closed runs in NA aware manner
 	closed_runs <- apply(meMat.gc.f, 1, function(row){
 		nas <- findRuns(as.logical(row), val=NA)
 		closed <- findRuns(as.logical(row), val=0)
-		if(nrow(closed) == 0){
+		if (nrow(closed) == 0){
 			return(data.frame())
 		}
 		stitched <- stitchRuns(closed, nas)
@@ -120,7 +140,7 @@ for(i in seq(length(loci))){
 
 	# Infer open runs from closed runs
 	open_runs <- lapply(closed_runs, function(closed_run){
-		if(nrow(closed_run) > 1){
+		if (nrow(closed_run) > 1){
 			starts <- closed_run$ends[-nrow(closed_run)]
 			starts[starts %% 1 == 0] <- starts[starts %% 1 == 0] + 1
 			ends <- closed_run$starts[-1]
@@ -145,33 +165,54 @@ for(i in seq(length(loci))){
 
 	save(CpG_fil, GpC_fil, meMat.cg.f, meMat.gc.f, closed_runs, open_runs, 
 		 file=sprintf('rdata/%s-run.RData', loci$name[i]), version=2)
+	
+	return(NULL)
 }
+toc <- Sys.time()
+print(toc - tic)
 
 message("Saving run matrices")
-for(i in seq(length(loci))){
+tic <- Sys.time()
+tmp <- foreach(i=seq(length(loci))) %dopar% {
 	locus <- loci[i]
-	message(locus$name)
-	load(sprintf('rdata/%s-run.RData', locus$name))
-	
+	message(paste(i, locus$name))
+	test <- tryCatch(load(sprintf('rdata/%s-run.RData',locus$name)), 
+					 error=function(e){return(NULL)}, 
+					 warning=function(w){message(paste0(locus$name, ' empty'))})
+    
+    if (is.null(test)){
+        return(NULL)
+    }
 	open_run.qc <- sapply(open_runs, function(el){sum(el$dist > 500)})
 
+	if(sum(open_run.qc < 2) == 0){
+		return(NULL)
+	}
 	# Create GRanges from run data frames
 	closed.df <- do.call(rbind, closed_runs[open_run.qc < 2])
 
-	closed.gr <- GRanges(seqnames(locus), IRanges(closed.df$start, closed.df$end))
-	closed.gr$dist <- closed.df$dist
-	closed.gr$minDist <- closed.df$minDist
-	closed.gr$maxDist <- closed.df$maxDist
-
+	if (nrow(closed.df) == 0){
+		closed.gr <- GRanges()
+	} else {
+		closed.gr <- GRanges(seqnames(locus), IRanges(closed.df$start, closed.df$end))
+		closed.gr$dist <- closed.df$dist
+		closed.gr$minDist <- closed.df$minDist
+		closed.gr$maxDist <- closed.df$maxDist
+	}
+	
 	open.df <- do.call(rbind, open_runs[open_run.qc < 2])
 
-	open.gr <- GRanges(seqnames(locus), IRanges(open.df$start, open.df$end))
-	open.gr$dist <- open.df$dist
-	open.gr$minDist <- open.df$minDist
-	open.gr$maxDist <- open.df$maxDist
+	if (nrow(open.df) == 0){
+		open.gr <- GRanges()
+	} else {
+		open.gr <- GRanges(seqnames(locus), IRanges(open.df$start, open.df$end))
+		open.gr$dist <- open.df$dist
+		open.gr$minDist <- open.df$minDist
+		open.gr$maxDist <- open.df$maxDist
 
-	open.gr$left <- open.df$left
-	open.gr$right <- open.df$right
+		open.gr$left <- open.df$left
+		open.gr$right <- open.df$right
+	}
 
 	# Tiles
 	tiles <- tile(locus, width=5)[[1]]
@@ -197,7 +238,11 @@ for(i in seq(length(loci))){
 
 	save(runMat.open, runMat.linker, runMat.short, runMat.mono, runMat.di, runMat.tri, 
 		 tiles, open_run.qc, file=sprintf('rdata/%s-runMat.RData', locus$name), version=2)
+
+	return(NULL)
 }
+toc <- Sys.time()
+print(toc - tic)
 
 # Generate BigWig Tracks
 message("Generating BigWigs...")
@@ -206,124 +251,126 @@ write_bw(loci, 'open', prefix, smooth=F)
 write_bw(loci, 'open', prefix,  smooth=T)
 write_bw(loci, 'short', prefix,  smooth=F)
 
-# Peak Calling
-message("Calling peaks...")
-open_tiles.list <- sapply(seq_along(loci), function(i){
-	locus <- loci[i]
+stopCluster(cl)
 
-	message(locus$name)
-	load(sprintf('rdata/%s-runMat.RData', locus$name))
+# # Peak Calling
+# message("Calling peaks...")
+# open_tiles.list <- sapply(seq_along(loci), function(i){
+# 	locus <- loci[i]
 
-	return(tiles$open/tiles$tot)
-})
-open_tiles <- do.call(c, open_tiles.list)
-open_mean <- mean(open_tiles, na.rm=T)
-open_sd <- sd(open_tiles, na.rm=T)
+# 	message(locus$name)
+# 	load(sprintf('rdata/%s-runMat.RData', locus$name))
 
-pdf('peak_calling.pdf', width=24, height=16)
-txdb <- loadDb(txdb.path)
-open_peak.list <- lapply(seq_along(loci), function(i){
-	locus <- loci[i]
-	message(locus$name)
-	load(sprintf('rdata/%s-run.RData', locus$name))
-	load(sprintf('rdata/%s-runMat.RData', locus$name))
+# 	return(tiles$open/tiles$tot)
+# })
+# open_tiles <- do.call(c, open_tiles.list)
+# open_mean <- mean(open_tiles, na.rm=T)
+# open_sd <- sd(open_tiles, na.rm=T)
 
-	chr <- as.character(seqnames(locus))
-	from <- start(locus)
-	to <- end(locus)
+# pdf('peak_calling.pdf', width=24, height=16)
+# txdb <- loadDb(txdb.path)
+# open_peak.list <- lapply(seq_along(loci), function(i){
+# 	locus <- loci[i]
+# 	message(locus$name)
+# 	load(sprintf('rdata/%s-run.RData', locus$name))
+# 	load(sprintf('rdata/%s-runMat.RData', locus$name))
 
-	# Ideogram
-	bands <- read.table(ideo.path, sep='\t', header=F, stringsAsFactors=F, 
-						col.names=c('chrom', 'chromStart', 'chromEnd', 'name', 'gieStain'))
-	itrack <- IdeogramTrack(genome='hg38', bands=bands, chromosome=chr, cex=1.5)
+# 	chr <- as.character(seqnames(locus))
+# 	from <- start(locus)
+# 	to <- end(locus)
 
-	# Genome axis
-	gtrack <- GenomeAxisTrack(add53=T, add35=T, littleTicks=F, labelPos='below', cex=1.5)
+# 	# Ideogram
+# 	bands <- read.table(ideo.path, sep='\t', header=F, stringsAsFactors=F, 
+# 						col.names=c('chrom', 'chromStart', 'chromEnd', 'name', 'gieStain'))
+# 	itrack <- IdeogramTrack(genome='hg38', bands=bands, chromosome=chr, cex=1.5)
 
-	# Genes
-	txTr <- GeneRegionTrack(txdb, chromosome=chr, start=from, end=to, cex.title=2, 
-							rot.title=0, name='Genes', cex.group=1.2,
-							collapseTranscripts ="meta", transcriptAnnotation='symbol')
+# 	# Genome axis
+# 	gtrack <- GenomeAxisTrack(add53=T, add35=T, littleTicks=F, labelPos='below', cex=1.5)
+
+# 	# Genes
+# 	txTr <- GeneRegionTrack(txdb, chromosome=chr, start=from, end=to, cex.title=2, 
+# 							rot.title=0, name='Genes', cex.group=1.2,
+# 							collapseTranscripts ="meta", transcriptAnnotation='symbol')
 	
-	if(length(gene(txTr)) > 0){
-		symbols <- unlist(mapIds(org.Hs.eg.db, gene(txTr), "SYMBOL", "ENTREZID", multiVals = "first"))
-		symbol(txTr) <- symbols[gene(txTr)]
-	}
+# 	if(length(gene(txTr)) > 0){
+# 		symbols <- unlist(mapIds(org.Hs.eg.db, gene(txTr), "SYMBOL", "ENTREZID", multiVals = "first"))
+# 		symbol(txTr) <- symbols[gene(txTr)]
+# 	}
 	
-	tiles$cov <- tiles$tot 
-	openPeaks1 <- findPeaks(tiles$open/tiles$tot, tiles, thresh=30, restrict=locus, 
-							smoothing=T, mean=open_mean, sd=open_sd, erosion=4, 
-							dilation=4, plot=F, chr=chr, from=from, to=to, 
-							itrack=itrack, gtrack=gtrack, txTr=txTr)
-	if (length(openPeaks1) == 0){
-		message('No Peaks')
-		return(openPeaks1)
-	}
+# 	tiles$cov <- tiles$tot 
+# 	openPeaks1 <- findPeaks(tiles$open/tiles$tot, tiles, thresh=30, restrict=locus, 
+# 							smoothing=T, mean=open_mean, sd=open_sd, erosion=4, 
+# 							dilation=4, plot=F, chr=chr, from=from, to=to, 
+# 							itrack=itrack, gtrack=gtrack, txTr=txTr)
+# 	if (length(openPeaks1) == 0){
+# 		message('No Peaks')
+# 		return(openPeaks1)
+# 	}
 	
-	openPeaks2 <- findPeaks(tiles$open/tiles$tot, tiles, thresh=0, restrict=openPeaks1, 
-							smoothing=F, mean=open_mean, sd=open_sd, erosion=2, 
-							dilation=2, plot=T, chr=chr, from=from, to=to, 
-							itrack=itrack, gtrack=gtrack, txTr=txTr)
+# 	openPeaks2 <- findPeaks(tiles$open/tiles$tot, tiles, thresh=0, restrict=openPeaks1, 
+# 							smoothing=F, mean=open_mean, sd=open_sd, erosion=2, 
+# 							dilation=2, plot=T, chr=chr, from=from, to=to, 
+# 							itrack=itrack, gtrack=gtrack, txTr=txTr)
 	
-	openPeaks2$tot <- tallyHits(openPeaks2, GpC_fil)
+# 	openPeaks2$tot <- tallyHits(openPeaks2, GpC_fil)
 
-	return(openPeaks2[which(openPeaks2$tot > 1)])
-})
-dev.off()
+# 	return(openPeaks2[which(openPeaks2$tot > 1)])
+# })
+# dev.off()
 
-open_peaks <- suppressWarnings(do.call(c, open_peak.list))
-export.bed(open_peaks, paste0(prefix, '_open_peaks.bed'))
+# open_peaks <- suppressWarnings(do.call(c, open_peak.list))
+# export.bed(open_peaks, paste0(prefix, '_open_peaks.bed'))
 
-# Closed Peak Calling
-message("Calling closed peaks...")
-closed_tiles.list <- sapply(seq_along(loci), function(i){
-	locus <- loci[i]
+# # Closed Peak Calling
+# message("Calling closed peaks...")
+# closed_tiles.list <- sapply(seq_along(loci), function(i){
+# 	locus <- loci[i]
 
-	message(locus$name)
-	load(sprintf('rdata/%s-runMat.RData', locus$name))
+# 	message(locus$name)
+# 	load(sprintf('rdata/%s-runMat.RData', locus$name))
 
-	return(tiles$closed/tiles$tot)
-})
-closed_tiles <- do.call(c, closed_tiles.list)
-closed_mean <- mean(closed_tiles, na.rm=T)
-closed_sd <- sd(closed_tiles, na.rm=T)
+# 	return(tiles$closed/tiles$tot)
+# })
+# closed_tiles <- do.call(c, closed_tiles.list)
+# closed_mean <- mean(closed_tiles, na.rm=T)
+# closed_sd <- sd(closed_tiles, na.rm=T)
 
-pdf('peak_calling_closed.pdf', width=24, height=16)
-closed_peak.list <- lapply(seq_along(loci), function(i){
-	locus <- loci[i]
-	message(locus$name)
-	load(sprintf('rdata/%s-run.RData', locus$name))
-	load(sprintf('rdata/%s-runMat.RData', locus$name))
+# pdf('peak_calling_closed.pdf', width=24, height=16)
+# closed_peak.list <- lapply(seq_along(loci), function(i){
+# 	locus <- loci[i]
+# 	message(locus$name)
+# 	load(sprintf('rdata/%s-run.RData', locus$name))
+# 	load(sprintf('rdata/%s-runMat.RData', locus$name))
 
-	chr <- as.character(seqnames(locus))
-	from <- start(locus)
-	to <- end(locus)
+# 	chr <- as.character(seqnames(locus))
+# 	from <- start(locus)
+# 	to <- end(locus)
 
-	# Ideogram
-	bands <- read.table(ideo.path, sep='\t', header=F, stringsAsFactors=F, 
-						col.names=c('chrom', 'chromStart', 'chromEnd', 'name', 'gieStain'))
-	itrack <- IdeogramTrack(genome='hg38', bands=bands, chromosome=chr, cex=1.5)
+# 	# Ideogram
+# 	bands <- read.table(ideo.path, sep='\t', header=F, stringsAsFactors=F, 
+# 						col.names=c('chrom', 'chromStart', 'chromEnd', 'name', 'gieStain'))
+# 	itrack <- IdeogramTrack(genome='hg38', bands=bands, chromosome=chr, cex=1.5)
 
-	# Genome axis
-	gtrack <- GenomeAxisTrack(add53=T, add35=T, littleTicks=F, labelPos='below', cex=1.5)
+# 	# Genome axis
+# 	gtrack <- GenomeAxisTrack(add53=T, add35=T, littleTicks=F, labelPos='below', cex=1.5)
 
-	# Genes
-	txTr <- GeneRegionTrack(txdb, chromosome=chr, start=from, end=to, cex.title=2, rot.title=0, name='Genes', cex.group=1.2,
-		collapseTranscripts ="meta", transcriptAnnotation='symbol')
+# 	# Genes
+# 	txTr <- GeneRegionTrack(txdb, chromosome=chr, start=from, end=to, cex.title=2, rot.title=0, name='Genes', cex.group=1.2,
+# 		collapseTranscripts ="meta", transcriptAnnotation='symbol')
 	
-	if(length(gene(txTr)) > 0){
-		symbols <- unlist(mapIds(org.Hs.eg.db, gene(txTr), "SYMBOL", "ENTREZID", multiVals = "first"))
-		symbol(txTr) <- symbols[gene(txTr)]
-	}
-	tiles$cov <- tiles$tot
-	closedPeaks1 <- findPeaks(tiles$closed/tiles$tot, tiles, thresh=0, restrict=locus, 
-							  smoothing=F, mean=closed_mean*2, sd=closed_sd*2, erosion=1, 
-							  dilation=1, plot=T, chr=chr, from=from, to=to, 
-							itrack=itrack, gtrack=gtrack, txTr=txTr)
+# 	if(length(gene(txTr)) > 0){
+# 		symbols <- unlist(mapIds(org.Hs.eg.db, gene(txTr), "SYMBOL", "ENTREZID", multiVals = "first"))
+# 		symbol(txTr) <- symbols[gene(txTr)]
+# 	}
+# 	tiles$cov <- tiles$tot
+# 	closedPeaks1 <- findPeaks(tiles$closed/tiles$tot, tiles, thresh=0, restrict=locus, 
+# 							  smoothing=F, mean=closed_mean*2, sd=closed_sd*2, erosion=1, 
+# 							  dilation=1, plot=T, chr=chr, from=from, to=to, 
+# 							itrack=itrack, gtrack=gtrack, txTr=txTr)
 
-	return(closedPeaks1)
-})
-dev.off()
+# 	return(closedPeaks1)
+# })
+# dev.off()
 
-closed_peaks <- suppressWarnings(do.call(c, closed_peak.list))
-export.bed(closed_peaks, paste0(prefix, '_closed_peaks.bed'))
+# closed_peaks <- suppressWarnings(do.call(c, closed_peak.list))
+# export.bed(closed_peaks, paste0(prefix, '_closed_peaks.bed'))

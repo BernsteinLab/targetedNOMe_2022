@@ -22,7 +22,7 @@
 
 # Dotkits (RedHat7)
 source /broad/software/scripts/useuse
-reuse -q .anaconda3-5.3.1
+reuse -q Anaconda3
 eval "$(conda shell.bash hook)"
 reuse -q .samtools-1.9
 reuse -q .htslib-1.8

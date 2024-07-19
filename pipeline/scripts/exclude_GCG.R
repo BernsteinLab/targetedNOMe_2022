@@ -28,6 +28,7 @@ gcg <- readRDS(gcg.path)
 message('Loading methylation BED file...')
 gr <- import.bed(args[1], extraCols=c(total='integer', meth='integer'),
 				 colnames=c('chrom', 'start', 'end', 'strand', 'total', 'meth'))
+gr <- keepStandardChromosomes(gr, pruning.mode='coarse')
 gr$score <- gr$meth / gr$total
 
 # Tally GCG hits and CG/GC hits

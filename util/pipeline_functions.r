@@ -54,6 +54,9 @@ diNT <- function(locus, diNT){
 	#	A GRanges object with all positions of diNT within the locus
 	ntSeq <- getSeq(genome, locus)
 	matches <- vmatchPattern(diNT, ntSeq, fixed='subject')[[1]]
+	if (length(matches) == 0) {
+		return(GRanges())
+	}
 	fix <- ifelse(diNT == 'CG', 'start', 'end')
 	mC <- GRanges(seqnames(locus), shift(resize(matches, width=1, fix=fix), start(locus)-1))
 	return(mC)
@@ -70,6 +73,9 @@ findCGC <- function(locus){
 	#	on the positive strand
 	ntSeq <- getSeq(genome, locus)
 	matches <- vmatchPattern('CGC', ntSeq, fixed='subject')[[1]]
+	if (length(matches) == 0){
+		return(GRanges())
+	}
 	mC <- GRanges(seqnames(locus), shift(matches, start(locus)-1))
 	return(mC)
 }
@@ -111,8 +117,16 @@ findGroups <- function(locus, thresh=5){
 	ntSeq <- getSeq(genome, locus)
 	CG_hits <- vmatchPattern('CG', ntSeq, fixed='subject')[[1]]
 	GC_hits <- vmatchPattern('GC', ntSeq, fixed='subject')[[1]]
-	CG <- GRanges(seqnames(locus), shift(resize(CG_hits, width=1, fix='start'), start(locus)-1))
-	GC <- GRanges(seqnames(locus), shift(resize(GC_hits, width=1, fix='start'), start(locus)-1))
+	if (length(CG_hits) == 0){
+		CG <- GRanges()
+	} else {
+		CG <- GRanges(seqnames(locus), shift(resize(CG_hits, width=1, fix='start'), start(locus)-1))
+	}
+	if (length(GC_hits) == 0){
+		GC <- GRanges()
+	} else {
+		GC <- GRanges(seqnames(locus), shift(resize(GC_hits, width=1, fix='start'), start(locus)-1))
+	}
 
 	mC <- mergeNT(sort(c(CG, GC)), thresh)
 	return(mC)
@@ -155,12 +169,12 @@ meMat <- function(locus, calls, diNT){
 		read <- buffer[buffer$name == reads[i]]
 		matches <- findOverlaps(read, diNT)
 		if (length(matches) > 0){
-		meMat[i, subjectHits(matches)] <- read$score[queryHits(matches)] 
+			meMat[i, subjectHits(matches)] <- read$score[queryHits(matches)] 
 		}
 	}
 
 	row_id <- order(rowSums(!is.na(meMat)), decreasing=T)
-	return(meMat[row_id,])
+	return(meMat[row_id,,drop=F])
 }
 
 dev <- function(meMat){
@@ -395,6 +409,9 @@ runMat <- function(gcReads, GpC, runs, locus, gap, mode){
 	for(i in seq(nrow(gcReads))){
 		gcRow <- gcReads[i, ]
 		gcIdx <- !is.na(gcRow)
+		if (sum(gcIdx) == 0){
+			next
+		}
 		gcFirst <- min(which(gcIdx))
 		gcLast <- max(which(gcIdx))
 
@@ -484,9 +501,18 @@ write_bw <- function(loci, type, prefix, smooth=F, hap.names=NULL){
 	bw.list <- lapply(seq_along(loci), function(i, type){
 		locus <- loci[i]
 		message(locus$name)
-		load(sprintf('rdata/%s-run.RData', locus$name))
-		load(sprintf('rdata/%s-runMat.RData', locus$name))
+		runTest <- tryCatch(load(sprintf('rdata/%s-run.RData', locus$name)), 
+							error=function(e){return(NULL)}, 
+							warning=function(w){message(paste0(locus$name, ' empty'))})
+		matTest <- tryCatch(load(sprintf('rdata/%s-runMat.RData', locus$name)), 
+							error=function(e){return(NULL)}, 
+							warning=function(w){message(paste0(locus$name, ' empty'))})
 		
+		if (is.null(runTest) | is.null(matTest)){
+			return(GRanges())
+		}
+		
+
 		if (is.null(hap.names)) {
 			idx <- rep(TRUE, nrow(meMat.gc.f))
 		} else {
@@ -499,6 +525,10 @@ write_bw <- function(loci, type, prefix, smooth=F, hap.names=NULL){
 			runMat <- runMat.open
 		} else if(type == 'short'){
 			runMat <- runMat.short
+		}
+
+		if (nrow(runMat) < 5){
+			return(GRanges())
 		}
 		buffer$tot <- colSums(!is.na(runMat[select,]))
 		buffer$run <- colSums(runMat[select,], na.rm=T)

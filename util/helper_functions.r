@@ -134,7 +134,11 @@ mergeMat <- function(reads, diNT, mergeNT, strands=F){
 		if (length(cols) == 1){
 			mat[,ids[i]] <- reads[,cols]
 		} else {
-			mat[,ids[i]] <- rowMeans(reads[,cols], na.rm=T)
+			if (nrow(reads) == 1){
+				mat[,ids[i]] <- mean(reads[,cols], na.rm=T)
+			} else {
+				mat[,ids[i]] <- rowMeans(reads[,cols], na.rm=T)
+			}
 		}
 	}
 
@@ -400,9 +404,14 @@ tallyHits <- function(gr1, gr2){
 	#
 	# Returns:
 	#	A vector of integers equal in length to gr1 counting hits of gr2
-	hits <- findOverlaps(gr1, gr2)
-	hits.df <- aggregate(rep(1, length(hits)), by=list(queryHits(hits)), FUN=sum)
 	result <- rep(NA, length(gr1))
+
+	hits <- findOverlaps(gr1, gr2)
+	if(length(hits) == 0){
+		return(result)
+	}
+	hits.df <- aggregate(rep(1, length(hits)), by=list(queryHits(hits)), FUN=sum)
+	
 	result[hits.df$Group.1] <- hits.df$x
 	return(result)
 }
